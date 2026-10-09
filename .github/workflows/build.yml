@@ -1,78 +1,87 @@
-name: DTBank
-options:
-  bundleIdPrefix: com.dtbank
-  deploymentTarget:
-    iOS: "14.0"
-  createIntermediateGroups: true
-  xcodeVersion: "15"
+name: Build DTBank IPA
 
-settings:
-  base:
-    PRODUCT_NAME: "DTBank"
-    PRODUCT_BUNDLE_IDENTIFIER: com.dtbank.mobile
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
-    CLANG_CXX_LANGUAGE_STANDARD: "c++17"
-    CLANG_CXX_LIBRARY: "libc++"
-    CLANG_ENABLE_MODULES: "YES"
-    IPHONEOS_DEPLOYMENT_TARGET: "14.0"
-    TARGETED_DEVICE_FAMILY: "1,2"
-    CODE_SIGN_IDENTITY: ""
-    CODE_SIGNING_REQUIRED: "NO"
-    CODE_SIGNING_ALLOWED: "NO"
-    ENABLE_BITCODE: "NO"
-    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-    OTHER_LDFLAGS:
-      - "$(inherited)"
-      - "-framework UIKit"
-      - "-framework Foundation"
-      - "-framework CoreGraphics"
-      - "-framework QuartzCore"
-    LD_RUNPATH_SEARCH_PATHS:
-      - "$(inherited)"
-      - "@executable_path/Frameworks"
-      - "@loader_path/Frameworks"
-    STRIP_INSTALLED_PRODUCT: "NO"
-  configs:
-    Debug:
-      DEBUG_INFORMATION_FORMAT: dwarf
-    Release:
-      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
-      GCC_OPTIMIZATION_LEVEL: "s"
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
 
-targets:
-  DTBank:
-    type: application
-    platform: iOS
-    sources:
-      - path: Sources/App
-        name: Sources
-    resources:
-      - path: Resources
-        type: folder
-        name: Resources
-    dependencies:
-      - sdk: UIKit.framework
-      - sdk: Foundation.framework
-      - sdk: CoreGraphics.framework
-      - sdk: QuartzCore.framework
-    info:
-      path: Sources/App/Info.plist
-      properties:
-        CFBundleName: "DTBank"
-        CFBundleDisplayName: "ĐTBank"
-        CFBundleExecutable: "DTBank"
-        CFBundlePackageType: APPL
-        CFBundleSupportedPlatforms:
-          - iPhoneOS
-        MinimumOSVersion: "14.0"
-        UILaunchScreen: {}
-        UIRequiresFullScreen: true
-        UIStatusBarStyle: UIStatusBarStyleLightContent
-        UIViewControllerBasedStatusBarAppearance: false
-        UIStatusBarHidden: false
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: 🚀 Build & Package DTBank IPA
+    runs-on: macos-14
+
+    steps:
+      - name: 📦 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📂 Auto-Extract ZIP if uploaded
+        run: |
+          for f in *.zip; do
+            if [ -f "$f" ] && [ "$f" != "*.zip" ]; then
+              echo "Phát hiện $f, đang giải nén..."
+              python3 -c "import zipfile; zipfile.ZipFile('$f').extractall('.')"
+              ls -la
+              break
+            fi
+          done
+
+      - name: 🛠 Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: 📋 Install XcodeGen
+        run: brew install xcodegen
+
+      - name: ⚙️ Generate Xcode Project
+        run: xcodegen generate
+
+      - name: 🏗 Build iOS App Archive
+        run: |
+          xcodebuild archive \
+            -project DTBank.xcodeproj \
+            -scheme DTBank \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/DTBank.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: 📱 Package DTBank.ipa
+        run: |
+          mkdir -p build/Payload
+          APP_PATH=$(find "$PWD/build/DTBank.xcarchive/Products/Applications" -name "*.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Lỗi: Không tìm thấy file app!"
+            exit 1
+          fi
+          echo "Tìm thấy App tại: $APP_PATH"
+          cp -r "$APP_PATH" build/Payload/
+          
+          cd build
+          zip -qr "DTBank.ipa" Payload
+          echo "✅ Đã tạo xong DTBank.ipa!"
+          ls -lh DTBank.ipa
+
+      - name: 📤 Upload Artifacts (DTBank-IPA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DTBank-IPA
+          path: build/DTBank.ipa
+          retention-days: 14
+
+      - name: 🏷️ Create Release with direct .ipa download
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/heads/master')
+        with:
+          tag_name: v1.0.0-${{ github.run_number }}
+          name: "ĐTBank Mobile Release v1.0.${{ github.run_number }}"
+          body: "🎉 File DTBank.ipa đã sẵn sàng cài đặt qua TrollStore, ESign, Scarlet, Sideloadly."
+          files: build/DTBank.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
