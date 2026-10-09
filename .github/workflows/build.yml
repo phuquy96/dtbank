@@ -1,0 +1,97 @@
+name: Build DTBank IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: 🚀 Build & Package DTBank IPA
+    runs-on: macos-14
+
+    steps:
+      # ─── 1. Checkout Repo ────────────────────────────────
+      - name: 📦 Checkout Repository
+        uses: actions/checkout@v4
+
+      # ─── 2. Tự động giải nén file ZIP khi up lên ────────
+      - name: 📂 Auto-Extract ZIP (DTBank.zip)
+        run: |
+          echo "Kiểm tra file zip trong repository..."
+          for f in *.zip; do
+            if [ -f "$f" ] && [ "$f" != "*.zip" ]; then
+              echo "==> Tìm thấy $f! Đang giải nén toàn bộ mã nguồn..."
+              python3 -c "import zipfile; zipfile.ZipFile('$f').extractall('.')"
+              echo "Danh sách thư mục sau giải nén:"
+              ls -la
+              break
+            fi
+          done
+
+      # ─── 3. Cài đặt Xcode 15 ─────────────────────────────
+      - name: 🛠 Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # ─── 4. Cài đặt XcodeGen ─────────────────────────────
+      - name: 📋 Install XcodeGen
+        run: brew install xcodegen
+
+      # ─── 5. Tạo Xcode Project từ file project.yml ────────
+      - name: ⚙️ Generate Xcode Project
+        run: xcodegen generate
+
+      # ─── 6. Build Archive & Compile C++ / Obj-C++ ────────
+      - name: 🏗 Build iOS App Archive
+        run: |
+          xcodebuild archive \
+            -project DTBank.xcodeproj \
+            -scheme DTBank \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$PWD/build/DTBank.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      # ─── 7. Đóng gói thành file DTBank.ipa ───────────────
+      - name: 📱 Package DTBank.ipa
+        run: |
+          mkdir -p build/Payload
+          APP_PATH=$(find "$PWD/build/DTBank.xcarchive/Products/Applications" -name "*.app" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Lỗi: Không tìm thấy file app!"
+            exit 1
+          fi
+          echo "Tìm thấy App tại: $APP_PATH"
+          cp -r "$APP_PATH" build/Payload/
+          
+          cd build
+          zip -qr "DTBank.ipa" Payload
+          echo "✅ Đã tạo xong DTBank.ipa! Dung lượng: $(du -sh DTBank.ipa | cut -f1)"
+
+      # ─── 8. Tải file IPA lên Artifacts ───────────────────
+      - name: 📤 Upload Artifacts (DTBank-IPA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DTBank-IPA
+          path: build/DTBank.ipa
+          retention-days: 14
+
+      # ─── 9. Tự động tạo Release để tải trực tiếp file .ipa
+      - name: 🏷️ Create Release with direct .ipa download
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main') || startsWith(github.ref, 'refs/heads/master')
+        with:
+          tag_name: v1.0.0-${{ github.run_number }}
+          name: "ĐTBank Mobile Release v1.0.${{ github.run_number }}"
+          body: "🎉 File DTBank.ipa đã sẵn sàng cài đặt qua TrollStore, ESign, Scarlet, Sideloadly."
+          files: build/DTBank.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
